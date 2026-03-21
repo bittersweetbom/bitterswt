@@ -1932,12 +1932,12 @@ function delById(e,evId,day,lane){e.stopPropagation();e.preventDefault();data[da
 function resetAll(){if(!confirm('초기 상태로 되돌릴까요?'))return;data={월:{mom:[],child:[]},화:{mom:[],child:[]},수:{mom:[],child:[]},목:{mom:[],child:[]},금:{mom:[],child:[]},토:{mom:[],child:[]},일:{mom:[],child:[]}};uid=1;init();render();localStorage.removeItem(STORAGE_KEY);}
 function copyAll(){let txt='📅 주간 스케줄\n\n';DAYS.forEach(day=>{txt+=`[ ${day}요일 ]\n`;['mom','child'].forEach(lane=>{const label=lane==='mom'?'👩 엄마':'🎒 아이';const evs=data[day][lane];if(evs.length){txt+=`  ${label}:\n`;evs.forEach(e=>{txt+=`    • ${e.start}~${e.end} ${e.title}${e.note?' ('+e.note+')':''}\n`;})}});txt+='\n';});navigator.clipboard.writeText(txt).then(()=>showCopyToast('📋 클립보드에 복사됐어요!')).catch(()=>{const ta=document.createElement('textarea');ta.value=txt;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);showCopyToast('📋 복사됐어요!');});}
 
-// ── 시간 select 초기화 (자정 넘기는 시간 포함 00:00~26:45) ──
+// ── 시간 select 초기화 (자정 넘기는 시간 포함 00:00~26:59) ──
 function buildTimeSelects(){
   const slots=[];
   for(let h=0;h<=26;h++){
-    for(let m=0;m<60;m+=15){
-      if(h===26&&m>45) break;
+    for(let m=0;m<60;m+=1){
+      if(h===26&&m>59) break;
       const display=`${String(h>=24?h-24:h).padStart(2,'0')}:${String(m).padStart(2,'0')}${h>=24?' (+1)':''}`;
       const val=`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
       slots.push({val,display});
