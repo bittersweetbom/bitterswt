@@ -2934,10 +2934,9 @@ function rAcadStartedByDate(acad, ds){
 function rAcadHasClassOnV2(acad, ds){
   const koDay = rDsToKoDay(ds);
   if(!['월','화','수','목','금'].includes(koDay)) return false;
-  const yrmo = ds.slice(0,7);
-  const days = rGetAcadDaysForMonth(acad, yrmo);
-  if(!days.includes(koDay)) return false;
-  return rAcadStartedByDate(acad, ds);
+  if(!rAcadStartedByDate(acad, ds)) return false;
+  const cfg = rGetAcadConfigForDate(acad, ds);
+  return cfg.days.includes(koDay);
 }
 function rDsToKoDay(ds){
   return ['일','월','화','수','목','금','토'][new Date(ds+'T00:00:00').getDay()];
@@ -3072,7 +3071,19 @@ function rStartEditAcad(id){
   const memberVal=a.member||'child';
   const rb=document.querySelector(`input[name="rAcadMember"][value="${memberVal}"]`);
   if(rb) rb.checked=true;
-  rRenderMonthDaysList(a);
+  // 날짜 기준 변경 불러오기
+  if(a.change){
+    document.getElementById('rChangeFromDate').value=a.change.fromDate||'';
+    ['월','화','수','목','금'].forEach(d=>{ const cb=document.getElementById('rCH'+d); if(cb) cb.checked=(a.change.days||[]).includes(d); });
+    document.getElementById('rCHTimeStart').value=a.change.timeStart||'';
+    document.getElementById('rCHTimeEnd').value=a.change.timeEnd||'';
+  } else {
+    document.getElementById('rChangeFromDate').value='';
+    ['월','화','수','목','금'].forEach(d=>{ const cb=document.getElementById('rCH'+d); if(cb) cb.checked=false; });
+    document.getElementById('rCHTimeStart').value='';
+    document.getElementById('rCHTimeEnd').value='';
+  }
+  rRenderAcadChangeDisplay(a);
   const days=a.days||[];
   ['월','화','수','목','금'].forEach(d=>{ const cb=document.getElementById('rAcadDay'+d); if(cb) cb.checked=days.includes(d); });
   document.getElementById('rAcadAddSectionLabel').textContent='학원 수정';
@@ -3088,9 +3099,16 @@ function rCancelEditAcad(){
   document.getElementById('rAcadTimeStart').value='16:00';
   document.getElementById('rAcadTimeEnd').value='17:30';
   document.getElementById('rAcadPickup').value='';
+  document.getElementById('rChangeFromDate').value='';
+  ['월','화','수','목','금'].forEach(d=>{
+    const cb=document.getElementById('rAcadDay'+d); if(cb) cb.checked=false;
+    const cb2=document.getElementById('rCH'+d); if(cb2) cb2.checked=false;
+  });
+  document.getElementById('rCHTimeStart').value='';
+  document.getElementById('rCHTimeEnd').value='';
+  const el=document.getElementById('rAcadChangeDisplay'); if(el) el.innerHTML='';
   const rb=document.querySelector('input[name="rAcadMember"][value="child"]');
   if(rb) rb.checked=true;
-  ['월','화','수','목','금'].forEach(d=>{ const cb=document.getElementById('rAcadDay'+d); if(cb) cb.checked=false; });
   document.getElementById('rAcadAddSectionLabel').textContent='새 학원 추가';
   document.getElementById('rAcadSubmitBtn').textContent='추가';
   document.getElementById('rAcadCancelEditBtn').style.display='none';
@@ -3214,48 +3232,74 @@ function rRenderAcadPayList(){
   el.innerHTML=html;
 }
 
-let _rEditingAcadForMonthDays = null;
-function rAddMonthDays(){
-  const ym=document.getElementById('rMonthDaysYM').value;
-  if(!ym){alert('월을 선택하세요');return;}
-  const days=['월','화','수','목','금'].filter(d=>document.getElementById('rMD'+d).checked);
-  const timeStart=document.getElementById('rMDTimeStart').value||'';
-  const timeEnd=document.getElementById('rMDTimeEnd').value||'';
+// ── 날짜 기준 변경 ────────────────────────────
+function rApplyAcadChange(){
   if(!_rAcadEditId){alert('학원을 먼저 선택 후 수정하세요');return;}
+  const fromDate=document.getElementById('rChangeFromDate').value;
+  if(!fromDate){alert('날짜를 선택하세요');return;}
+  const days=['월','화','수','목','금'].filter(d=>document.getElementById('rCH'+d)?.checked);
+  const timeStart=document.getElementById('rCHTimeStart').value||'';
+  const timeEnd=document.getElementById('rCHTimeEnd').value||'';
+  if(!days.length&&!timeStart){alert('변경할 요일 또는 시간을 입력하세요');return;}
   const a=(R.academies||[]).find(x=>x.id===_rAcadEditId);
   if(!a) return;
-  if(!a.monthDays) a.monthDays={};
-  if(days.length||timeStart||timeEnd){
-    a.monthDays[ym]={ days: days.length?days:null, timeStart:timeStart||null, timeEnd:timeEnd||null };
-  } else {
-    delete a.monthDays[ym];
+  a.change={ fromDate, days:days.length?days:null, timeStart:timeStart||null, timeEnd:timeEnd||null };
+  rRenderAcadChangeDisplay(a);
+  rSave(); rSyncAcadToScheduler(); rRenderMonthly();
+}
+
+function rClearAcadChange(){
+  if(!_rAcadEditId) return;
+  const a=(R.academies||[]).find(x=>x.id===_rAcadEditId);
+  if(!a) return;
+  delete a.change;
+  // 입력 초기화
+  document.getElementById('rChangeFromDate').value='';
+  ['월','화','수','목','금'].forEach(d=>{ const cb=document.getElementById('rCH'+d); if(cb) cb.checked=false; });
+  document.getElementById('rCHTimeStart').value='';
+  document.getElementById('rCHTimeEnd').value='';
+  rRenderAcadChangeDisplay(a);
+  rSave(); rSyncAcadToScheduler(); rRenderMonthly();
+}
+
+function rRenderAcadChangeDisplay(a){
+  const el=document.getElementById('rAcadChangeDisplay'); if(!el) return;
+  if(!a||!a.change){ el.innerHTML='<span style="font-size:10px;color:#ddd;">변경 없음</span>'; return; }
+  const c=a.change;
+  const dayStr=c.days?c.days.join('·'):'요일 동일';
+  const timeStr=(c.timeStart&&c.timeEnd)?`${c.timeStart}~${c.timeEnd}`:'시간 동일';
+  el.innerHTML=`<div style="background:#fff;border:1px solid #f0d0dc;border-radius:8px;padding:7px 10px;font-size:11px;">
+    <span style="color:#c06080;font-weight:500;">${c.fromDate} 이후</span>
+    <span style="color:#888;margin-left:6px;">${dayStr} · ${timeStr}</span>
+  </div>`;
+}
+
+// 학원의 특정 날짜 기준으로 적용할 요일/시간 반환
+function rGetAcadConfigForDate(acad, ds){
+  if(acad.change && ds >= acad.change.fromDate){
+    return {
+      days: acad.change.days || acad.days || [],
+      timeStart: acad.change.timeStart || acad.timeStart || '16:00',
+      timeEnd: acad.change.timeEnd || acad.timeEnd || '17:30',
+    };
   }
-  rSave(); rRenderMonthDaysList(a); rRenderMonthly(); rSyncAcadToScheduler();
+  return {
+    days: acad.days || [],
+    timeStart: acad.timeStart || '16:00',
+    timeEnd: acad.timeEnd || '17:30',
+  };
 }
-function rRenderMonthDaysList(a){
-  const el=document.getElementById('rMonthDaysList'); if(!el) return;
-  const md=a.monthDays||{};
-  const keys=Object.keys(md).sort();
-  if(!keys.length){el.innerHTML='<span style="color:#ddd;">월별 예외 없음</span>';return;}
-  el.innerHTML=keys.map(ym=>{
-    const entry=md[ym];
-    // 하위 호환 — 구형 배열 형태도 처리
-    const daysArr=Array.isArray(entry)?entry:(entry.days||[]);
-    const tStart=Array.isArray(entry)?null:entry.timeStart;
-    const tEnd=Array.isArray(entry)?null:entry.timeEnd;
-    const dayStr=daysArr.length?daysArr.join('·'):'요일 동일';
-    const timeStr=(tStart&&tEnd)?` ${tStart}~${tEnd}`:'';
-    return`<span style="display:inline-flex;align-items:center;gap:4px;background:#fff;border:1px solid #f0d0dc;border-radius:12px;padding:2px 8px;margin:2px;">
-      <span style="color:#c06080;">${ym}</span>
-      <span style="color:#888;">${dayStr}${timeStr}</span>
-      <span onclick="rDelMonthDays('${a.id}','${ym}')" style="color:#ddd;cursor:pointer;font-size:12px;">×</span>
-    </span>`;
-  }).join('');
+
+// 하위 호환 — rGetAcadDaysForMonth, rGetAcadTimeForMonth을 날짜 기반으로 대체
+function rGetAcadDaysForMonth(acad, yrmo){
+  // yrmo 기준 1일 날짜로 판단
+  const ds = yrmo + '-01';
+  return rGetAcadConfigForDate(acad, ds).days;
 }
-function rDelMonthDays(acadId, ym){
-  const a=(R.academies||[]).find(x=>x.id===acadId); if(!a) return;
-  if(a.monthDays) delete a.monthDays[ym];
-  rSave(); rRenderMonthDaysList(a); rRenderMonthly(); rSyncAcadToScheduler();
+function rGetAcadTimeForMonth(acad, yrmo){
+  const ds = yrmo + '-01';
+  const cfg = rGetAcadConfigForDate(acad, ds);
+  return { timeStart: cfg.timeStart, timeEnd: cfg.timeEnd };
 }
 function rGetAttendCount(acadId){
   // 이번달 출석 횟수
@@ -3974,28 +4018,41 @@ window.addEventListener('blur',()=>{ _ctrlDown=false; });
         <input type="date" id="rAcadStartDate" style="border:1px solid #f0d0dc;border-radius:6px;padding:4px 8px;font-size:11px;outline:none;color:#444;">
       </div>
 
-      <!-- 월별 요일 변경 -->
-      <div style="margin-top:8px;padding:8px 10px;background:#fdf8f9;border-radius:8px;border:0.5px solid #f0d0dc;">
-        <div style="font-size:10px;color:#c06080;font-weight:500;margin-bottom:6px;">월별 수업 요일 변경</div>
-        <div style="font-size:10px;color:#aaa;margin-bottom:6px;">기본 요일과 다른 달만 설정해요</div>
-        <div style="display:flex;gap:6px;margin-bottom:6px;">
-          <input id="rMonthDaysYM" type="month" style="border:1px solid #f0d0dc;border-radius:6px;padding:3px 6px;font-size:10px;outline:none;flex:1;">
-          <button onclick="rAddMonthDays()" style="background:#c06080;color:#fff;border:none;border-radius:6px;padding:3px 10px;font-size:10px;cursor:pointer;">적용</button>
+      <!-- 날짜 기준 변경 -->
+      <div style="margin-top:8px;padding:10px 12px;background:#fdf8f9;border-radius:8px;border:0.5px solid #f0d0dc;">
+        <div style="font-size:11px;color:#c06080;font-weight:500;margin-bottom:4px;">📅 이후 일정 변경</div>
+        <div style="font-size:10px;color:#aaa;margin-bottom:8px;">지정 날짜부터 요일·시간이 바뀌는 경우</div>
+
+        <!-- 현재 변경 표시 -->
+        <div id="rAcadChangeDisplay" style="margin-bottom:8px;"></div>
+
+        <!-- 변경 입력 -->
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span style="font-size:10px;color:#888;flex-shrink:0;width:36px;">날짜</span>
+            <input type="date" id="rChangeFromDate" style="flex:1;border:1px solid #f0d0dc;border-radius:6px;padding:4px 8px;font-size:11px;outline:none;color:#444;">
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span style="font-size:10px;color:#888;flex-shrink:0;width:36px;">요일</span>
+            <div style="display:flex;gap:5px;flex-wrap:wrap;">
+              <label style="display:flex;align-items:center;gap:2px;font-size:11px;color:#444;cursor:pointer;"><input type="checkbox" id="rCH월"> 월</label>
+              <label style="display:flex;align-items:center;gap:2px;font-size:11px;color:#444;cursor:pointer;"><input type="checkbox" id="rCH화"> 화</label>
+              <label style="display:flex;align-items:center;gap:2px;font-size:11px;color:#444;cursor:pointer;"><input type="checkbox" id="rCH수"> 수</label>
+              <label style="display:flex;align-items:center;gap:2px;font-size:11px;color:#444;cursor:pointer;"><input type="checkbox" id="rCH목"> 목</label>
+              <label style="display:flex;align-items:center;gap:2px;font-size:11px;color:#444;cursor:pointer;"><input type="checkbox" id="rCH금"> 금</label>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span style="font-size:10px;color:#888;flex-shrink:0;width:36px;">시간</span>
+            <input type="time" id="rCHTimeStart" style="flex:1;border:1px solid #f0d0dc;border-radius:5px;padding:3px 6px;font-size:11px;outline:none;">
+            <span style="font-size:10px;color:#aaa;">~</span>
+            <input type="time" id="rCHTimeEnd" style="flex:1;border:1px solid #f0d0dc;border-radius:5px;padding:3px 6px;font-size:11px;outline:none;">
+          </div>
+          <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:2px;">
+            <button onclick="rApplyAcadChange()" style="background:#c06080;color:#fff;border:none;border-radius:6px;padding:4px 14px;font-size:11px;cursor:pointer;">적용</button>
+            <button onclick="rClearAcadChange()" style="background:none;border:1px solid #f0d0dc;border-radius:6px;padding:4px 10px;font-size:11px;color:#c06080;cursor:pointer;">변경 초기화</button>
+          </div>
         </div>
-        <div style="display:flex;gap:5px;flex-wrap:wrap;" id="rMonthDaysBtns">
-          <label style="display:flex;align-items:center;gap:2px;font-size:11px;color:#888;cursor:pointer;"><input type="checkbox" id="rMD월"> 월</label>
-          <label style="display:flex;align-items:center;gap:2px;font-size:11px;color:#888;cursor:pointer;"><input type="checkbox" id="rMD화"> 화</label>
-          <label style="display:flex;align-items:center;gap:2px;font-size:11px;color:#888;cursor:pointer;"><input type="checkbox" id="rMD수"> 수</label>
-          <label style="display:flex;align-items:center;gap:2px;font-size:11px;color:#888;cursor:pointer;"><input type="checkbox" id="rMD목"> 목</label>
-          <label style="display:flex;align-items:center;gap:2px;font-size:11px;color:#888;cursor:pointer;"><input type="checkbox" id="rMD금"> 금</label>
-        </div>
-        <div style="display:flex;gap:6px;align-items:center;margin-top:6px;">
-          <span style="font-size:10px;color:#aaa;flex-shrink:0;">시간 변경</span>
-          <input type="time" id="rMDTimeStart" style="flex:1;border:1px solid #f0d0dc;border-radius:5px;padding:2px 6px;font-size:10px;outline:none;" placeholder="시작">
-          <span style="font-size:10px;color:#aaa;">~</span>
-          <input type="time" id="rMDTimeEnd" style="flex:1;border:1px solid #f0d0dc;border-radius:5px;padding:2px 6px;font-size:10px;outline:none;" placeholder="종료">
-        </div>
-        <div id="rMonthDaysList" style="margin-top:8px;font-size:10px;color:#aaa;"></div>
       </div>
 
       <div style="font-size:10px;color:#ccc;padding:4px 0 2px;">💡 결제일은 월간 탭에서 달마다 날짜로 설정해요</div>
