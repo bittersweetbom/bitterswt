@@ -1932,12 +1932,12 @@ function delById(e,evId,day,lane){e.stopPropagation();e.preventDefault();data[da
 function resetAll(){if(!confirm('초기 상태로 되돌릴까요?'))return;data={월:{mom:[],child:[]},화:{mom:[],child:[]},수:{mom:[],child:[]},목:{mom:[],child:[]},금:{mom:[],child:[]},토:{mom:[],child:[]},일:{mom:[],child:[]}};uid=1;init();render();localStorage.removeItem(STORAGE_KEY);}
 function copyAll(){let txt='📅 주간 스케줄\n\n';DAYS.forEach(day=>{txt+=`[ ${day}요일 ]\n`;['mom','child'].forEach(lane=>{const label=lane==='mom'?'👩 엄마':'🎒 아이';const evs=data[day][lane];if(evs.length){txt+=`  ${label}:\n`;evs.forEach(e=>{txt+=`    • ${e.start}~${e.end} ${e.title}${e.note?' ('+e.note+')':''}\n`;})}});txt+='\n';});navigator.clipboard.writeText(txt).then(()=>showCopyToast('📋 클립보드에 복사됐어요!')).catch(()=>{const ta=document.createElement('textarea');ta.value=txt;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);showCopyToast('📋 복사됐어요!');});}
 
-// ── 시간 select 초기화 (자정 넘기는 시간 포함 00:00~26:59) ──
+// ── 시간 select 초기화 (자정 넘기는 시간 포함 00:00~26:45) ──
 function buildTimeSelects(){
   const slots=[];
   for(let h=0;h<=26;h++){
-    for(let m=0;m<60;m+=1){
-      if(h===26&&m>59) break;
+    for(let m=0;m<60;m+=15){
+      if(h===26&&m>45) break;
       const display=`${String(h>=24?h-24:h).padStart(2,'0')}:${String(m).padStart(2,'0')}${h>=24?' (+1)':''}`;
       const val=`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
       slots.push({val,display});
@@ -2913,9 +2913,19 @@ function rAcadHasClassOn(acad, ds){ return rAcadHasClassOnV2(acad, ds); }
 
 // 학원 월별 요일/시작일 헬퍼
 function rGetAcadDaysForMonth(acad, yrmo){
-  // yrmo: "2025-04" 형태
-  if(acad.monthDays && acad.monthDays[yrmo]) return acad.monthDays[yrmo];
-  return acad.days||[];
+  const entry=acad.monthDays&&acad.monthDays[yrmo];
+  if(!entry) return acad.days||[];
+  // 구형(배열) 호환
+  if(Array.isArray(entry)) return entry;
+  return entry.days||acad.days||[];
+}
+function rGetAcadTimeForMonth(acad, yrmo){
+  // 월별 예외 시간이 있으면 그걸 쓰고, 없으면 기본값
+  const entry=acad.monthDays&&acad.monthDays[yrmo];
+  if(entry&&!Array.isArray(entry)&&entry.timeStart&&entry.timeEnd){
+    return {timeStart:entry.timeStart, timeEnd:entry.timeEnd};
+  }
+  return {timeStart:acad.timeStart||'16:00', timeEnd:acad.timeEnd||'17:30'};
 }
 function rAcadStartedByDate(acad, ds){
   if(!acad.startDate) return true;
@@ -2935,6 +2945,7 @@ function rDsToKoDay(ds){
 // 학원 설정 모달
 function rOpenAcadMgr(){
   rRenderAcadMgrList();
+  rUpdateAcadMemberUI();
   document.getElementById('rAcadMgrModal').style.display='flex';
 }
 let _rAcadEditId = null;
@@ -2942,23 +2953,79 @@ let _rAcadEditId = null;
 function rRenderAcadMgrList(){
   const el=document.getElementById('rAcadList');
   const acads=R.academies||[];
+  const momName=document.getElementById('mom-name')?.value||'BOM';
+  const childName=document.getElementById('child-name')?.value||'ROBIN';
   if(!acads.length){ el.innerHTML='<div style="font-size:11px;color:var(--muted);padding:4px 0 8px;">등록된 학원 없음</div>'; return; }
   el.innerHTML=acads.map(a=>{
-    const pm=PAY_METHOD[a.payMethod]||{label:a.payMethod,cls:''};
+    const pm=PAY_METHOD[a.payMethod]||{label:a.payMethod||'',cls:''};
     const days=a.days||[];
     const dayStr=days.length===0?'요일 미설정':days.length===5?'월~금':days.join('·');
-    const _ic=a.color||'#c06080';
+    const memberName=a.member==='mom'?momName:childName;
+    const timeStr=(a.timeStart&&a.timeEnd)?`${a.timeStart}~${a.timeEnd}`:'시간 미설정';
+    const pickupLabels={mom:`👩 ${momName}`,husband:'👨',academy:'🚌',self:'🚶'};
+    const pickupStr=a.pickup?pickupLabels[a.pickup]||'':'';
     return`<div class="r-acad-mgr-item" id="acadrow_${a.id}">
       <div style="width:34px;height:34px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:22px;">${a.emoji||'📚'}</div>
       <div style="flex:1;min-width:0;">
-        <div style="font-size:13px;font-weight:500;color:#222;">${a.name}</div>
-        <div style="font-size:11px;color:#bbb;margin-top:2px;">수업일: ${dayStr}</div>
+        <div style="font-size:13px;font-weight:500;color:#222;">${a.name} <span style="font-size:10px;color:#c06080;font-weight:400;">${memberName}</span></div>
+        <div style="font-size:11px;color:#bbb;margin-top:2px;">${dayStr} &nbsp;·&nbsp; ${timeStr} ${pickupStr?'&nbsp;·&nbsp;'+pickupStr:''}</div>
       </div>
       <span class="${pm.cls}" style="font-size:10px;padding:2px 8px;border-radius:4px;pointer-events:none;">${pm.label}</span>
       <button data-id="${a.id}" onclick="rStartEditAcad(this.dataset.id)" style="background:none;border:none;color:#ddd;cursor:pointer;font-size:14px;padding:0 4px;">✏️</button>
       <button data-id="${a.id}" data-name="${a.name}" onclick="rConfirmDelAcad(this)" style="background:none;border:none;color:#ddd;cursor:pointer;font-size:16px;padding:0 3px;line-height:1;">×</button>
     </div>`;
   }).join('');
+}
+
+// ── 학원 → 스케줄러 자동 동기화 ──────────────
+function rSyncAcadToScheduler(){
+  if(typeof data === 'undefined') return;
+  const DAYS_KO=['월','화','수','목','금'];
+  // 현재 보고 있는 달 기준으로 동기화
+  const currentYrmo = rGetAcadMonthKey();
+
+  // 1. 기존 학원에서 만든 블록 전부 제거 (acadId 링크된 것)
+  DAYS_KO.forEach(day=>{
+    ['mom','child'].forEach(lane=>{
+      if(data[day]&&data[day][lane]){
+        data[day][lane]=data[day][lane].filter(ev=>!ev.acadId);
+      }
+    });
+  });
+
+  // 2. 학원 데이터 기반으로 새 블록 생성 (이번 달 기준)
+  (R.academies||[]).forEach(a=>{
+    const lane=a.member||'child';
+    const days=rGetAcadDaysForMonth(a, currentYrmo);
+    const {timeStart:start, timeEnd:end}=rGetAcadTimeForMonth(a, currentYrmo);
+    const pickup=a.pickup||'';
+
+    days.forEach(day=>{
+      if(!DAYS_KO.includes(day)) return;
+      if(!data[day]) data[day]={mom:[],child:[]};
+      if(!data[day][lane]) data[day][lane]=[];
+      // 수업 블록
+      data[day][lane].push({
+        id:id(), title:`${a.emoji||'📚'} ${a.name}`,
+        start, end, type:'school',
+        note:'', pickup, color:'', acadId:a.id
+      });
+      // 픽업 담당이 BOM이면 엄마 레인에 픽업 블록 자동 생성
+      if(pickup==='mom'){
+        const childName=document.getElementById('child-name')?.value||'ROBIN';
+        if(!data[day]['mom']) data[day]['mom']=[];
+        data[day]['mom'].push({
+          id:id(), title:`🚗 ${childName} 픽업`,
+          start:minToT(toMin(end)-5),
+          end:minToT(toMin(end)+15),
+          type:'private', note:`← ${a.name}`,
+          pickup:'', color:'', acadId:a.id+'_pickup'
+        });
+      }
+    });
+  });
+  saveToStorage();
+  if(typeof render==='function') render();
 }
 
 function rConfirmDelAcad(btn){
@@ -2995,36 +3062,67 @@ function rStartEditAcad(id){
   _rAcadEditId=id;
   document.getElementById('rAcadName').value=a.name;
   document.getElementById('rAcadEmoji').value=a.emoji||'';
-  document.getElementById('rAcadPayMethod').value=a.payMethod;
+  document.getElementById('rAcadPayMethod').value=a.payMethod||'cash';
   document.getElementById('rAcadColor').value=a.color||'#c06080';
   document.getElementById('rAcadStartDate').value=a.startDate||'';
+  document.getElementById('rAcadTimeStart').value=a.timeStart||'16:00';
+  document.getElementById('rAcadTimeEnd').value=a.timeEnd||'17:30';
+  document.getElementById('rAcadPickup').value=a.pickup||'';
+  // 담당자 라디오
+  const memberVal=a.member||'child';
+  const rb=document.querySelector(`input[name="rAcadMember"][value="${memberVal}"]`);
+  if(rb) rb.checked=true;
   rRenderMonthDaysList(a);
-  // 요일 체크박스
   const days=a.days||[];
-  ['월','화','수','목','금'].forEach(d=>{
-    const cb=document.getElementById('rAcadDay'+d);
-    if(cb) cb.checked=days.includes(d);
-  });
+  ['월','화','수','목','금'].forEach(d=>{ const cb=document.getElementById('rAcadDay'+d); if(cb) cb.checked=days.includes(d); });
   document.getElementById('rAcadAddSectionLabel').textContent='학원 수정';
   document.getElementById('rAcadSubmitBtn').textContent='저장';
   document.getElementById('rAcadCancelEditBtn').style.display='inline-block';
   document.getElementById('rAcadName').focus();
+  rUpdateAcadMemberUI();
 }
 function rCancelEditAcad(){
   _rAcadEditId=null;
   document.getElementById('rAcadName').value='';
   document.getElementById('rAcadEmoji').value='';
+  document.getElementById('rAcadTimeStart').value='16:00';
+  document.getElementById('rAcadTimeEnd').value='17:30';
+  document.getElementById('rAcadPickup').value='';
+  const rb=document.querySelector('input[name="rAcadMember"][value="child"]');
+  if(rb) rb.checked=true;
   ['월','화','수','목','금'].forEach(d=>{ const cb=document.getElementById('rAcadDay'+d); if(cb) cb.checked=false; });
   document.getElementById('rAcadAddSectionLabel').textContent='새 학원 추가';
   document.getElementById('rAcadSubmitBtn').textContent='추가';
   document.getElementById('rAcadCancelEditBtn').style.display='none';
+}
+function rUpdateAcadMemberUI(){
+  const momName=document.getElementById('mom-name')?.value||'BOM';
+  const childName=document.getElementById('child-name')?.value||'ROBIN';
+  document.getElementById('rAcadMemberBomName').textContent=momName;
+  document.getElementById('rAcadMemberRobinName').textContent=childName;
+  // update pickup select labels too
+  const pu=document.getElementById('rAcadPickup');
+  if(pu){
+    pu.options[1].text='👩 '+momName;
+    pu.options[2].text='👨 '+(document.getElementById('dad-name')?.value||'RANG');
+  }
 }
 function rAddAcad(){
   const name=document.getElementById('rAcadName').value.trim();
   if(!name){alert('학원 이름을 입력하세요');return;}
   const days=['월','화','수','목','금'].filter(d=>{ const cb=document.getElementById('rAcadDay'+d); return cb&&cb.checked; });
   const emojiInput=document.getElementById('rAcadEmoji').value||rGuessEmoji(name);
-  const saved={name, days, payMethod:document.getElementById('rAcadPayMethod').value, color:document.getElementById('rAcadColor').value, emoji:emojiInput};
+  const member=document.querySelector('input[name="rAcadMember"]:checked')?.value||'child';
+  const timeStart=document.getElementById('rAcadTimeStart').value||'16:00';
+  const timeEnd=document.getElementById('rAcadTimeEnd').value||'17:30';
+  const pickup=document.getElementById('rAcadPickup').value||'';
+  const saved={
+    name, days, member, timeStart, timeEnd, pickup,
+    payMethod:document.getElementById('rAcadPayMethod').value,
+    color:document.getElementById('rAcadColor').value,
+    emoji:emojiInput,
+    startDate:document.getElementById('rAcadStartDate').value||''
+  };
   if(!R.academies) R.academies=[];
   if(_rAcadEditId){
     const idx=R.academies.findIndex(x=>x.id===_rAcadEditId);
@@ -3033,11 +3131,13 @@ function rAddAcad(){
     R.academies.push({id:'ac_'+Date.now(), payDays:{}, ...saved});
   }
   rCancelEditAcad();
+  rSyncAcadToScheduler();
   rSave(); rRenderAcadMgrList(); rRenderAcadPayList(); rRenderMonthly();
 }
 function rDelAcad(id){
   R.academies=(R.academies||[]).filter(x=>x.id!==id);
   if(_rAcadEditId===id) rCancelEditAcad();
+  rSyncAcadToScheduler();
   rSave(); rRenderAcadMgrList(); rRenderAcadPayList(); rRenderMonthly();
 }
 
@@ -3119,29 +3219,43 @@ function rAddMonthDays(){
   const ym=document.getElementById('rMonthDaysYM').value;
   if(!ym){alert('월을 선택하세요');return;}
   const days=['월','화','수','목','금'].filter(d=>document.getElementById('rMD'+d).checked);
+  const timeStart=document.getElementById('rMDTimeStart').value||'';
+  const timeEnd=document.getElementById('rMDTimeEnd').value||'';
   if(!_rAcadEditId){alert('학원을 먼저 선택 후 수정하세요');return;}
   const a=(R.academies||[]).find(x=>x.id===_rAcadEditId);
   if(!a) return;
   if(!a.monthDays) a.monthDays={};
-  if(days.length) a.monthDays[ym]=days;
-  else delete a.monthDays[ym];
-  rSave(); rRenderMonthDaysList(a); rRenderMonthly();
+  if(days.length||timeStart||timeEnd){
+    a.monthDays[ym]={ days: days.length?days:null, timeStart:timeStart||null, timeEnd:timeEnd||null };
+  } else {
+    delete a.monthDays[ym];
+  }
+  rSave(); rRenderMonthDaysList(a); rRenderMonthly(); rSyncAcadToScheduler();
 }
 function rRenderMonthDaysList(a){
   const el=document.getElementById('rMonthDaysList'); if(!el) return;
   const md=a.monthDays||{};
   const keys=Object.keys(md).sort();
   if(!keys.length){el.innerHTML='<span style="color:#ddd;">월별 예외 없음</span>';return;}
-  el.innerHTML=keys.map(ym=>`<span style="display:inline-flex;align-items:center;gap:4px;background:#fff;border:1px solid #f0d0dc;border-radius:12px;padding:2px 8px;margin:2px;">
-    <span style="color:#c06080;">${ym}</span>
-    <span style="color:#888;">${md[ym].join('·')}</span>
-    <span onclick="rDelMonthDays('${a.id}','${ym}')" style="color:#ddd;cursor:pointer;font-size:12px;">×</span>
-  </span>`).join('');
+  el.innerHTML=keys.map(ym=>{
+    const entry=md[ym];
+    // 하위 호환 — 구형 배열 형태도 처리
+    const daysArr=Array.isArray(entry)?entry:(entry.days||[]);
+    const tStart=Array.isArray(entry)?null:entry.timeStart;
+    const tEnd=Array.isArray(entry)?null:entry.timeEnd;
+    const dayStr=daysArr.length?daysArr.join('·'):'요일 동일';
+    const timeStr=(tStart&&tEnd)?` ${tStart}~${tEnd}`:'';
+    return`<span style="display:inline-flex;align-items:center;gap:4px;background:#fff;border:1px solid #f0d0dc;border-radius:12px;padding:2px 8px;margin:2px;">
+      <span style="color:#c06080;">${ym}</span>
+      <span style="color:#888;">${dayStr}${timeStr}</span>
+      <span onclick="rDelMonthDays('${a.id}','${ym}')" style="color:#ddd;cursor:pointer;font-size:12px;">×</span>
+    </span>`;
+  }).join('');
 }
 function rDelMonthDays(acadId, ym){
   const a=(R.academies||[]).find(x=>x.id===acadId); if(!a) return;
   if(a.monthDays) delete a.monthDays[ym];
-  rSave(); rRenderMonthDaysList(a); rRenderMonthly();
+  rSave(); rRenderMonthDaysList(a); rRenderMonthly(); rSyncAcadToScheduler();
 }
 function rGetAttendCount(acadId){
   // 이번달 출석 횟수
@@ -3791,12 +3905,30 @@ window.addEventListener('blur',()=>{ _ctrlDown=false; });
 </script>
 <!-- 학원 설정 모달 -->
 <div class="r-modal-bg" id="rAcadMgrModal" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
-  <div class="r-modal" style="max-width:380px;">
+  <div class="r-modal" style="max-width:400px;max-height:90vh;overflow-y:auto;">
     <h3 style="font-size:15px;font-weight:500;color:#222;margin-bottom:14px;">🏫 학원 설정</h3>
-    <div id="rAcadList" style="margin-bottom:12px;max-height:260px;overflow-y:auto;"></div>
+    <div id="rAcadList" style="margin-bottom:12px;max-height:220px;overflow-y:auto;"></div>
     <div style="border-top:0.5px solid #f0e8ec;padding-top:14px;">
       <div style="font-size:11px;font-weight:500;margin-bottom:10px;color:#c06080;" id="rAcadAddSectionLabel">새 학원 추가</div>
-      <div class="r-fr"><label style="color:#888;font-size:11px;">학원 이름</label><input id="rAcadName" placeholder="예: 수학학원" oninput="const e=document.getElementById('rAcadEmoji');if(!e._manual)e.value=rGuessEmoji(this.value);" onkeydown="if(event.key==='Enter')rAddAcad()"></div>
+
+      <!-- 이름 + 이모지 -->
+      <div class="r-fr"><label style="color:#888;font-size:11px;">학원 이름</label>
+        <input id="rAcadName" placeholder="예: 크레시티 수학" oninput="const e=document.getElementById('rAcadEmoji');if(!e._manual)e.value=rGuessEmoji(this.value);" onkeydown="if(event.key==='Enter')rAddAcad()">
+      </div>
+
+      <!-- 담당자 BOM / ROBIN -->
+      <div class="r-fr"><label style="color:#888;font-size:11px;">담당자</label>
+        <div style="display:flex;gap:8px;padding:4px 0;">
+          <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:#444;cursor:pointer;padding:5px 12px;border:1.5px solid #f0d0dc;border-radius:7px;" id="rAcadMemberBomLabel">
+            <input type="radio" name="rAcadMember" id="rAcadMemberBom" value="mom" checked onchange="rUpdateAcadMemberUI()"> <span id="rAcadMemberBomName">BOM</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:#444;cursor:pointer;padding:5px 12px;border:1.5px solid #f0d0dc;border-radius:7px;" id="rAcadMemberRobinLabel">
+            <input type="radio" name="rAcadMember" id="rAcadMemberRobin" value="child" onchange="rUpdateAcadMemberUI()"> <span id="rAcadMemberRobinName">ROBIN</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- 수업 요일 -->
       <div class="r-fr"><label style="color:#888;font-size:11px;">수업 요일</label>
         <div style="display:flex;gap:8px;flex-wrap:wrap;padding:4px 0;">
           <label style="display:flex;align-items:center;gap:3px;font-size:12px;color:#444;cursor:pointer;"><input type="checkbox" id="rAcadDay월" value="월"> 월</label>
@@ -3806,6 +3938,29 @@ window.addEventListener('blur',()=>{ _ctrlDown=false; });
           <label style="display:flex;align-items:center;gap:3px;font-size:12px;color:#444;cursor:pointer;"><input type="checkbox" id="rAcadDay금" value="금"> 금</label>
         </div>
       </div>
+
+      <!-- 수업 시간 -->
+      <div class="r-fr">
+        <label style="color:#888;font-size:11px;">수업 시간</label>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="time" id="rAcadTimeStart" value="16:00" style="flex:1;border:1px solid #f0d0dc;border-radius:6px;padding:5px 8px;font-size:12px;outline:none;color:#444;">
+          <span style="font-size:11px;color:#aaa;">~</span>
+          <input type="time" id="rAcadTimeEnd" value="17:30" style="flex:1;border:1px solid #f0d0dc;border-radius:6px;padding:5px 8px;font-size:12px;outline:none;color:#444;">
+        </div>
+      </div>
+
+      <!-- 픽업 담당 -->
+      <div class="r-fr"><label style="color:#888;font-size:11px;">픽업 담당</label>
+        <select id="rAcadPickup" style="border:1px solid #f0d0dc;border-radius:6px;padding:5px 8px;font-size:12px;outline:none;width:100%;">
+          <option value="">없음 / 해당없음</option>
+          <option value="mom">👩 BOM</option>
+          <option value="husband">👨 RANG</option>
+          <option value="academy">🚌 학원차</option>
+          <option value="self">🚶 자기등하원</option>
+        </select>
+      </div>
+
+      <!-- 결제 방법 -->
       <div class="r-fr"><label style="color:#888;font-size:11px;">결제 방법</label>
         <select id="rAcadPayMethod">
           <option value="cash">현금</option>
@@ -3813,9 +3968,13 @@ window.addEventListener('blur',()=>{ _ctrlDown=false; });
           <option value="card">카드</option>
         </select>
       </div>
+
+      <!-- 시작 날짜 -->
       <div class="r-fr"><label style="color:#888;font-size:11px;">시작 날짜</label>
         <input type="date" id="rAcadStartDate" style="border:1px solid #f0d0dc;border-radius:6px;padding:4px 8px;font-size:11px;outline:none;color:#444;">
       </div>
+
+      <!-- 월별 요일 변경 -->
       <div style="margin-top:8px;padding:8px 10px;background:#fdf8f9;border-radius:8px;border:0.5px solid #f0d0dc;">
         <div style="font-size:10px;color:#c06080;font-weight:500;margin-bottom:6px;">월별 수업 요일 변경</div>
         <div style="font-size:10px;color:#aaa;margin-bottom:6px;">기본 요일과 다른 달만 설정해요</div>
@@ -3830,10 +3989,19 @@ window.addEventListener('blur',()=>{ _ctrlDown=false; });
           <label style="display:flex;align-items:center;gap:2px;font-size:11px;color:#888;cursor:pointer;"><input type="checkbox" id="rMD목"> 목</label>
           <label style="display:flex;align-items:center;gap:2px;font-size:11px;color:#888;cursor:pointer;"><input type="checkbox" id="rMD금"> 금</label>
         </div>
+        <div style="display:flex;gap:6px;align-items:center;margin-top:6px;">
+          <span style="font-size:10px;color:#aaa;flex-shrink:0;">시간 변경</span>
+          <input type="time" id="rMDTimeStart" style="flex:1;border:1px solid #f0d0dc;border-radius:5px;padding:2px 6px;font-size:10px;outline:none;" placeholder="시작">
+          <span style="font-size:10px;color:#aaa;">~</span>
+          <input type="time" id="rMDTimeEnd" style="flex:1;border:1px solid #f0d0dc;border-radius:5px;padding:2px 6px;font-size:10px;outline:none;" placeholder="종료">
+        </div>
         <div id="rMonthDaysList" style="margin-top:8px;font-size:10px;color:#aaa;"></div>
       </div>
+
       <div style="font-size:10px;color:#ccc;padding:4px 0 2px;">💡 결제일은 월간 탭에서 달마다 날짜로 설정해요</div>
-      <div class="r-fr"><label style="color:#888;font-size:11px;">이모지</label><input id="rAcadEmoji" placeholder="📚" maxlength="2" oninput="this._manual=!!this.value;" style="font-size:18px;text-align:center;width:48px;" onkeydown="if(event.key==='Enter')rAddAcad()"></div>
+      <div class="r-fr"><label style="color:#888;font-size:11px;">이모지</label>
+        <input id="rAcadEmoji" placeholder="📚" maxlength="2" oninput="this._manual=!!this.value;" style="font-size:18px;text-align:center;width:48px;" onkeydown="if(event.key==='Enter')rAddAcad()">
+      </div>
       <input type="hidden" id="rAcadColor" value="#c06080">
     </div>
     <div class="r-modal-acts">
